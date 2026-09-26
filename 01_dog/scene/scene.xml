@@ -1,0 +1,8 @@
+<mujoco model="dog_scene">
+
+    <option timestep="0.002" gravity="0 0 -9.81"/>
+    <include file="floor.xml"/>
+    <include file="../robot/black_description.xml"/>
+
+    <compiler angle="radian" meshdir="../robot/meshes/" inertiafromgeom="auto" inertiagrouprange="3 3" />
+</mujoco>

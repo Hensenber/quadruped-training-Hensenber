@@ -1,11 +1,12 @@
-<mujoco model="floor——scene">
+<mujoco>
     <worldbody>
         <geom name="floor"
               type="plane"
               pos="0 0 0"
               size="0 0 0.1"/>                  #前两个值表示xy方向半尺寸,都为0时表无限;第三个为可视化网格距离
 
-        
+        <light pos="0 0 5"/>
+
     </worldbody>
 
 
