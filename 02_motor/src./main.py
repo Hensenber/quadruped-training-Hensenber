@@ -15,6 +15,28 @@ def main():
     model = mujoco.MjModel.from_xml_path(MODEL_PATH)
     data = mujoco.MjData(model)
 
+    # 为四条小腿设置合法的初始关节角度
+    calf_initial_angles = {
+        "FL_calf_joint": -1.5,
+        "FR_calf_joint":  1.5,
+        "RR_calf_joint":  1.5,
+        "RL_calf_joint": -1.5,
+    }
+
+    for joint_name, initial_angle in calf_initial_angles.items():
+        qpos_id, _ = get_motor_indices(
+            model,
+            joint_name,
+            joint_name + "_motor"
+        )[:2]
+
+        data.qpos[qpos_id] = initial_angle
+
+    # 根据新的初始姿态更新运动学等相关数据
+    mujoco.mj_forward(model, data)
+
+
+
     #获取索引
     FL_HIP_QPOS,FL_HIP_QVEL,FL_HIP_CTRL = get_motor_indices(model,"FL_hip_joint","FL_hip_joint_motor")
 
@@ -52,12 +74,14 @@ def main():
         # 每 0.2 秒打印一次
             if data.time - last_print_time >= 0.2:
                 print(
-                f"time={data.time:.2f}  "
-                f"q={q:.3f}  "
-                f"dq={dq:.3f}  "
-                f"q_des={q_des:.3f}  "
-                f"tau={tau:.3f}"
-            )
+                    f"time={data.time:.2f}  "
+                    f"q={data.qpos[FL_HIP_QPOS]:.3f}  "
+                    f"dq={data.qvel[FL_HIP_QVEL]:.3f}  "
+                    f"ctrl={data.ctrl[FL_HIP_CTRL]:.3f}  "
+                    f"actuator_force={data.actuator_force[FL_HIP_CTRL]:.3f}  "
+                    f"qfrc_actuator={data.qfrc_actuator[FL_HIP_QVEL]:.3f}  "
+                    f"qfrc_constraint={data.qfrc_constraint[FL_HIP_QVEL]:.3f}"
+                )
 
                 last_print_time = data.time
 
