@@ -38,6 +38,11 @@
   </asset>
 
   <worldbody>
+  <geom
+    name="ground"
+    type="plane"
+    size="10 10 0.1"
+    pos="0 0 0"/>
     <body name="trunk" pos="0 0 0.7">
       <freejoint/>
       <inertial pos="-0.013095 -0.00005 -0.074252" mass="5.7042" fullinertia="0.0092853 0.0076386 0.012703 -0.0000026 0.0000017 -0.0000276"/>
