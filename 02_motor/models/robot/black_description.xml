@@ -1,5 +1,5 @@
 <mujoco model="GO 2026_4_12">
-  <compiler meshdir="meshes"/>
+  <compiler angle="radian" meshdir="meshes"/>
 
   <asset>
     <mesh name="trunk" file="trunk.STL" />
