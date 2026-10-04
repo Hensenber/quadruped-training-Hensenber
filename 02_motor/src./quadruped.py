@@ -3,14 +3,60 @@ import numpy as np
 import mujoco
 import mujoco.viewer
 from model_utils import print_model_info,get_joint_indices,get_actuator_id,get_motor_indices
+from enum import Enum, auto
 
 MODEL_PATH = "models/robot/black_description.xml"
+
+#使用Enum来枚举状态机的状态:阻尼模式与站立模式
+class RobotState(Enum):                 #枚举类型一般用驼峰写法PascalCase
+    DAMPING = auto()
+    STANDING = auto()
+
+#定义状态机类
+class RobotMachine:
+    def __init__(self):
+        self.state = RobotState.DAMPING #默认进入DAMPING模式
+        self.start_time = None          #记录站立开始时间,DAMPING模式下为None
+        self.start_angles = None         #记录站立开始角度,DAMPING模式下为None
+
+    def enter_STANDING(self,current_time,current_angles):
+        if self.state == RobotState.STANDING:
+            return
+        
+        else:
+            self.state = RobotState.STANDING
+            self.start_time = current_time
+            self.start_angles = current_angles.copy()
+
+        print("[FSM] DAMPING->STANDING")
+
+    def enter_DAMPING(self):
+        if self.state == RobotState.DAMPING:
+            return
+
+        else:
+            self.state = RobotState.DAMPING
+            self.start_time = None
+            self.start_angle = None
+
+        print("[FSM] STANDING->DAMPING")
+
+#使用mujoco自带的键盘处理函数来处理外部键盘输入
+from queue import SimpleQueue,Empty
+def handle_key(keycode,pending_commmands):
+    #将按键转换成状态切换命令
+    if keycode == ord("["):
+        pending_commmands.put(RobotState.STANDING)
+    elif keycode == ord("]"):
+        pending_commmands.put(RobotState.DAMPING)
+
 
 #核心参数设置
 Kp = 20.0                       #虚拟弹簧刚度系数
 Kd = 3.0                        #阻尼系数
+Kd_DAMPING = 3.0                #阻尼模式阻尼系数
 
-#修改initial_angels与target_angels中的参数即可控制狗的不同姿态
+#修改initial_angles与target_angles中的参数即可控制狗的不同姿态
 #calf控制小腿的摆动角
 INITIAL_ANGLES = {
     "FL_hip_joint":   0.0,
@@ -244,20 +290,59 @@ def main():
 
     print("\n=== Start 12-Joint PD ===")
 
+    #创建状态机
+    fsm = RobotMachine()
+
+    #创建键盘命令队列
+    pending_commands = SimpleQueue()
+
+    # 定义Viewer键盘回调
+    def on_key(keycode):
+        handle_key(keycode,pending_commands)
+    
+
     #启动可视化
-    with mujoco.viewer.launch_passive(model,data) as viewer:
+    with mujoco.viewer.launch_passive(model,data,key_callback=on_key) as viewer:
         wall_start = time.perf_counter()
 
-        while viewer.is_running() and data.time < SIM_DURATION:
+        while viewer.is_running():
+            #处理键盘命令
+            while True:
+                try:
+                    command = pending_commands.get_nowait()
+                except Empty:
+                    break
+
+                if command == RobotState.STANDING:
+                    current_angles = np.array([data.qpos[motor["qpos_id"]]for motor in motors])
+                    fsm.enter_STANDING(current_time=data.time,current_angles=current_angles)
+
+                elif command == RobotState.DAMPING:
+                    fsm.enter_DAMPING()
+
             #计算12个关节的力矩
-            for motor in motors:
+            for i, motor in enumerate(motors):
 
                 q = data.qpos[motor["qpos_id"]]
                 dq = data.qvel[motor["qvel_id"]]
 
-                q_des,dq_des = get_desired_state(data.time,motor["q_start"],motor["q_target"])
+                if fsm.state == RobotState.DAMPING:
+                    # 阻尼模式：不进行位置控制
+                    tau = -Kd_DAMPING * dq
 
-                tau = motor_control(q=q,dq=dq,q_des=q_des,dq_des=dq_des,tau_ff=0.0,Kp=Kp,Kd=Kd)
+                elif fsm.state == RobotState.STANDING:
+                    #计算本次动作的实际进行时间
+                    elapsed_time = data.time - fsm.start_time
+                    #获取本次动作的实际起始角度
+                    q_start = fsm.start_angles[i]
+                    #读取预设站立目标角度
+                    q_target = motor["q_target"]
+                    #生成平滑插值轨迹
+                    q_des,dq_des = get_desired_state(elapsed_time,q_start,q_target)
+                    tau = motor_control(q=q,dq=dq,q_des=q_des,dq_des=dq_des,tau_ff=0.0,Kp=Kp,Kd=Kd)
+                
+                else:
+                    raise RuntimeError("未知的机器人控制状态")
                 #检查电机控制限位
                 ctrl_id=motor["ctrl_id"]
                 if model.actuator_ctrllimited[ctrl_id]:
