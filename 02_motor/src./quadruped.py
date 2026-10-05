@@ -7,6 +7,47 @@ from enum import Enum, auto
 
 MODEL_PATH = "models/robot/black_description.xml"
 
+#引入狗趴姿的一组参数
+CROUCH_QPOS = np.array([
+    # trunk position
+    0.0113025555,
+    0.00516957988,
+    0.144941866,
+
+    # trunk quaternion: w, x, y, z
+    0.999937920,
+    0.000000808559040,
+    0.0000122068091,
+    0.0111425210,
+
+    # FL
+     0.501394745,
+     1.60080545,
+    -2.55423629,
+
+    # FR
+    -0.501393610,
+    -1.60080306,
+     2.55423900,
+
+    # RR
+     0.501359362,
+    -1.60081606,
+     2.55422931,
+
+    # RL
+    -0.501359963,
+     1.60081862,
+    -2.55422686,
+])
+
+MOVE_DURATION = 2.0             #平滑运动时间
+SIM_DURATION = 4.0              #总仿真时间,s
+DISABLE_GRAVITY = False          #关闭/开启重力
+DISABLE_CONTACT = False          #关闭/开启接触
+
+
+
 #使用Enum来枚举状态机的状态:阻尼模式与站立模式
 class RobotState(Enum):                 #枚举类型一般用驼峰写法PascalCase
     DAMPING = auto()
@@ -37,7 +78,7 @@ class RobotMachine:
         else:
             self.state = RobotState.DAMPING
             self.start_time = None
-            self.start_angle = None
+            self.start_angles = None
 
         print("[FSM] STANDING->DAMPING")
 
@@ -52,7 +93,7 @@ def handle_key(keycode,pending_commmands):
 
 
 #核心参数设置
-Kp = 20.0                       #虚拟弹簧刚度系数
+Kp = 80.0                       #虚拟弹簧刚度系数
 Kd = 3.0                        #阻尼系数
 Kd_DAMPING = 3.0                #阻尼模式阻尼系数
 
@@ -60,45 +101,39 @@ Kd_DAMPING = 3.0                #阻尼模式阻尼系数
 #calf控制小腿的摆动角
 INITIAL_ANGLES = {
     "FL_hip_joint":   0.0,
-    "FL_thigh_joint": 0.0,
-    "FL_calf_joint": -1.57,
+    "FL_thigh_joint": 0.43,
+    "FL_calf_joint": -0.85,
 
     "FR_hip_joint":   0.0,
-    "FR_thigh_joint": -0.0,
-    "FR_calf_joint":  1.57,
+    "FR_thigh_joint": -0.43,
+    "FR_calf_joint":  0.85,
 
     "RR_hip_joint":   0.0,
-    "RR_thigh_joint": -0.0,
-    "RR_calf_joint":  1.57,
+    "RR_thigh_joint": -0.43,
+    "RR_calf_joint":  0.85,
 
     "RL_hip_joint":   0.0,
-    "RL_thigh_joint": 0.0,
-    "RL_calf_joint": -1.57,
+    "RL_thigh_joint": 0.43,
+    "RL_calf_joint": -0.85,
 }
 
 TARGET_ANGLES = {
     "FL_hip_joint":   0.0,
-    "FL_thigh_joint": 0.3,
+    "FL_thigh_joint": 0.43,
     "FL_calf_joint": -0.85,
 
     "FR_hip_joint":   0.0,
-    "FR_thigh_joint": -0.3,
+    "FR_thigh_joint": -0.43,
     "FR_calf_joint":  0.85,
 
     "RR_hip_joint":   0.0,
-    "RR_thigh_joint": -0.3,
+    "RR_thigh_joint": -0.43,
     "RR_calf_joint":  0.85,
 
     "RL_hip_joint":   0.0,
-    "RL_thigh_joint": 0.3,
+    "RL_thigh_joint": 0.43,
     "RL_calf_joint": -0.85,
 }
-MOVE_DURATION = 4.0             #平滑运动时间
-SIM_DURATION = 6.0              #总仿真时间,s
-DISABLE_GRAVITY = True          #关闭/开启重力
-DISABLE_CONTACT = True          #关闭/开启接触
-
-
 
 def motor_control(q,dq,q_des,dq_des,tau_ff,Kp,Kd):
     tau = tau_ff + Kp * (q_des - q) + Kd * (dq_des - dq)
@@ -219,29 +254,17 @@ def build_motor_mapping(model):
 
     return motors
 
-def get_desired_state(t,q_start,q_target):
+def get_desired_state(t, q_start, q_target):
     s = np.clip(t / MOVE_DURATION, 0.0, 1.0)
 
-    # 三次平滑插值
-    alpha = 3.0 * s**2 - 2.0 * s**3
+    q_des = q_start + s * (q_target - q_start)
 
-
-    if t < MOVE_DURATION:
-        alpha_dot = (
-            6.0 * s - 6.0 * s**2
-        ) / MOVE_DURATION
+    if 0.0 <= t < MOVE_DURATION:
+        dq_des = (q_target - q_start) / MOVE_DURATION
     else:
-        alpha_dot = 0.0
-
-    delta = q_target - q_start
-
-    q_des = q_start + alpha * delta
-    dq_des = alpha_dot * delta
+        dq_des = 0.0
 
     return q_des, dq_des
-
-
-
 
 
 
@@ -275,16 +298,33 @@ def main():
             f"start={motor['q_start']:.3f}, "
             f"target={motor['q_target']:.3f}"
         )
-
+    
     # 设置初始关节位置
+    if model.nq != len(CROUCH_QPOS):
+        raise ValueError(
+            f"初始姿态长度不匹配: "
+            f"nq={model.nq}, "
+            f"len(CROUCH_QPOS)={len(CROUCH_QPOS)}"
+        )
+
+    data.qpos[:] = CROUCH_QPOS
+    data.qvel[:] = 0.0    #直接引入稳定趴姿
+    
+
+    """
+    #设置机身初始位置与姿态
+    data.qpos[:] = 0.0
+    data.qpos[2] = 0.5
+    data.qpos[3] = 1.0
+
+    #根据INITIAL_ANGLES设置12个初始关节角度
     for motor in motors:
         data.qpos[motor["qpos_id"]] = motor["q_start"]
+    
+    data.qvel[:] = 0.0  #初始速度依然设置为0
+    """
 
-    data.qvel[:] = 0.0
-    data.ctrl[:] = 0.0
-
-    mujoco.mj_forward(model,data)
-
+    mujoco.mj_forward(model, data)
     # 保存时间变量
     last_print_time = -0.5
 
@@ -292,7 +332,16 @@ def main():
 
     #创建状态机
     fsm = RobotMachine()
+    # 静态站立实验：启动时直接进入 STANDING
+    current_angles = np.array([
+        data.qpos[motor["qpos_id"]]
+        for motor in motors
+    ])
 
+    fsm.enter_STANDING(
+        current_time=data.time,
+        current_angles=current_angles
+    )
     #创建键盘命令队列
     pending_commands = SimpleQueue()
 
@@ -320,9 +369,13 @@ def main():
                 elif command == RobotState.DAMPING:
                     fsm.enter_DAMPING()
 
-            #计算12个关节的力矩
-            for i, motor in enumerate(motors):
+            # 统计当前仿真步的控制情况
+            saturated_count = 0
+            max_tracking_error = 0.0
 
+            # 计算12个关节的力矩
+            for i, motor in enumerate(motors):
+                
                 q = data.qpos[motor["qpos_id"]]
                 dq = data.qvel[motor["qvel_id"]]
 
@@ -339,6 +392,8 @@ def main():
                     q_target = motor["q_target"]
                     #生成平滑插值轨迹
                     q_des,dq_des = get_desired_state(elapsed_time,q_start,q_target)
+                    error = abs(q_des - q)
+                    max_tracking_error = max(max_tracking_error, error)
                     tau = motor_control(q=q,dq=dq,q_des=q_des,dq_des=dq_des,tau_ff=0.0,Kp=Kp,Kd=Kd)
                 
                 else:
@@ -347,6 +402,9 @@ def main():
                 ctrl_id=motor["ctrl_id"]
                 if model.actuator_ctrllimited[ctrl_id]:
                     tau_min,tau_max = model.actuator_ctrlrange[ctrl_id]
+
+                    if(fsm.state==RobotState.STANDING and (tau < tau_min or tau > tau_max)):
+                        saturated_count += 1
                     tau = np.clip(tau,tau_min,tau_max)
                     
                 data.ctrl[ctrl_id] = tau
@@ -357,25 +415,12 @@ def main():
             # 每0.5秒打印一次
             if data.time - last_print_time >= 0.5:
 
-                errors = []
-
-                for motor in motors:
-
-                    q = data.qpos[motor["qpos_id"]]
-
-                    q_des, _ = get_desired_state(
-                        data.time,
-                        motor["q_start"],
-                        motor["q_target"]
+                if fsm.state == RobotState.STANDING:
+                    print(
+                        f"t={data.time:.2f} "
+                        f"saturated={saturated_count}/12 "
+                        f"max_error={max_tracking_error:.4f}"
                     )
-
-                    errors.append(abs(q_des - q))
-
-                print(
-                    f"time={data.time:.2f} "
-                    f"max_error={max(errors):.4f} "
-                    f"contacts={data.ncon}"
-                )
 
                 last_print_time = data.time
 
@@ -393,6 +438,26 @@ def main():
 
     # 打印最终状态
     print("\n=== Final Joint States ===")
+    print(f"ncon = {data.ncon}")
+
+    for i in range(data.ncon):
+        contact = data.contact[i]
+
+        geom1_name = mujoco.mj_id2name(
+            model,
+            mujoco.mjtObj.mjOBJ_GEOM,
+            contact.geom1
+        )
+
+        geom2_name = mujoco.mj_id2name(
+            model,
+            mujoco.mjtObj.mjOBJ_GEOM,
+            contact.geom2
+        )
+
+        print(f"{geom1_name} <-> {geom2_name}")
+
+
 
     for motor in motors:
 
