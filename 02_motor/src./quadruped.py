@@ -353,6 +353,8 @@ def main():
     #启动可视化
     with mujoco.viewer.launch_passive(model,data,key_callback=on_key) as viewer:
         wall_start = time.perf_counter()
+        RENDER_INTERVAL = 1.0 / 60.0
+        last_render_time = data.time - RENDER_INTERVAL
 
         while viewer.is_running():
             #处理键盘命令
@@ -424,18 +426,19 @@ def main():
 
                 last_print_time = data.time
 
-            viewer.sync()
+            # 按约60Hz的频率同步Viewer
+            if data.time - last_render_time >= RENDER_INTERVAL:
 
-            # 尽量与真实时间同步
-            elapsed = (
-                time.perf_counter() - wall_start
-            )
+                viewer.sync()
+                last_render_time = data.time
 
+            # 让仿真时间尽量与真实时间同步
+            elapsed = time.perf_counter() - wall_start
             remaining = data.time - elapsed
 
             if remaining > 0:
                 time.sleep(remaining)
-
+                
     # 打印最终状态
     print("\n=== Final Joint States ===")
     print(f"ncon = {data.ncon}")
